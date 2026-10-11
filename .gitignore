@@ -1,0 +1,5 @@
+*.shell-extension.zip
+src/schemas/gschemas.compiled
+.claude/session-state.md
+.env*
+!.env.example
