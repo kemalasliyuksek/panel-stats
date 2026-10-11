@@ -107,6 +107,14 @@ class StatSection extends St.BoxLayout {
         delete this._updateId;
     }
 
+    // Clutter destroys child actors without calling this method, so the handler connected in
+    // the constructor stays. Removing the timer here as well covers a section that is
+    // destroyed directly, and lets static analysis see that the timer goes with it.
+    destroy() {
+        this._clearTimeout();
+        super.destroy();
+    }
+
     _sync() {
         if (this.visible)
             this._ensureTimeout();
