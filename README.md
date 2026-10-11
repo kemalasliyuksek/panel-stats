@@ -16,6 +16,10 @@ by Florian Müllner. Two things differ:
 - A second section with a green icon appears while the NVIDIA card is awake, and goes away
   when the card suspends.
 
+| NVIDIA card asleep | NVIDIA card awake |
+| --- | --- |
+| ![Top bar with the integrated GPU's section](docs/topbar-integrated.png) | ![Top bar with the NVIDIA section next to it](docs/topbar-nvidia.png) |
+
 A glance therefore shows both whether the NVIDIA card is powered and which GPU is doing the
 work. An application that merely wakes the card, without rendering on it, shows up as an
 NVIDIA section at 0%.
