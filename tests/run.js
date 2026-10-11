@@ -4,7 +4,7 @@ import System from 'system';
 
 import {
     DgpuSampleSchedule, GpuMonitor, IDLE_SAMPLE_GAP_SECONDS, IDLE_SETTLE_SECONDS,
-    INTEGRATED_WINDOW_SECONDS, parsePercent,
+    INTEGRATED_WINDOW_SECONDS, WAKE_WATCH_SECONDS, parsePercent,
 } from '../src/gpu.js';
 
 const STATUS_PATH = '/fake/nvidia/runtime_status';
@@ -88,23 +88,34 @@ test('schedule samples every tick while the card reports load', () => {
     }
 });
 
+test('schedule samples every tick right after a wake-up even without load', () => {
+    const schedule = new DgpuSampleSchedule();
+    for (let now = 0; now < WAKE_WATCH_SECONDS; now++) {
+        assertEquals(schedule.isDue(now), true, `due at ${now}`);
+        schedule.record(0, now);
+    }
+    assertEquals(schedule.isDue(WAKE_WATCH_SECONDS), false, 'after the wake watch');
+});
+
 test('schedule backs off once the card has been idle for the settle time', () => {
     const schedule = new DgpuSampleSchedule();
+    const lastLoad = WAKE_WATCH_SECONDS + 30;
     schedule.record(0.5, 0);
-    schedule.record(0, 1);
-    assertEquals(schedule.isDue(IDLE_SETTLE_SECONDS - 1), true, 'still settling');
-    schedule.record(0, IDLE_SETTLE_SECONDS - 1);
-    assertEquals(schedule.isDue(IDLE_SETTLE_SECONDS), false, 'settled');
-    assertEquals(schedule.isDue(IDLE_SETTLE_SECONDS - 1 + IDLE_SAMPLE_GAP_SECONDS), true, 'gap over');
+    schedule.record(0.5, lastLoad);
+    schedule.record(0, lastLoad + 1);
+    assertEquals(schedule.isDue(lastLoad + IDLE_SETTLE_SECONDS - 1), true, 'still settling');
+    schedule.record(0, lastLoad + IDLE_SETTLE_SECONDS - 1);
+    assertEquals(schedule.isDue(lastLoad + IDLE_SETTLE_SECONDS), false, 'settled');
+    assertEquals(schedule.isDue(lastLoad + IDLE_SETTLE_SECONDS - 1 + IDLE_SAMPLE_GAP_SECONDS), true, 'gap over');
 });
 
 test('schedule starts over after a reset', () => {
     const schedule = new DgpuSampleSchedule();
     schedule.record(0, 0);
-    schedule.record(0, IDLE_SETTLE_SECONDS);
-    assertEquals(schedule.isDue(IDLE_SETTLE_SECONDS + 1), false, 'backed off');
+    schedule.record(0, WAKE_WATCH_SECONDS);
+    assertEquals(schedule.isDue(WAKE_WATCH_SECONDS + 1), false, 'backed off');
     schedule.reset();
-    assertEquals(schedule.isDue(IDLE_SETTLE_SECONDS + 1), true, 'after reset');
+    assertEquals(schedule.isDue(WAKE_WATCH_SECONDS + 1), true, 'after reset');
 });
 
 test('a suspended card is never queried and only the integrated GPU is reported', async () => {
@@ -187,13 +198,23 @@ test('an awake but idle card is queried rarely enough to fall asleep', async () 
     const io = fakeIo({[STATUS_PATH]: 'active\n'});
     const monitor = new GpuMonitor(GPUS, io);
     const queried = await secondsWithQuery(monitor, io, 60);
-    assertEquals(queried, [0, 1, 2, 22, 42], 'seconds with a query');
+    assertEquals(queried, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 29, 49], 'seconds with a query');
+});
+
+test('a workload that starts a few seconds after the wake-up is seen at once', async () => {
+    let load = '0\n';
+    const io = fakeIo({[STATUS_PATH]: 'active\n'}, () => load);
+    const monitor = new GpuMonitor(GPUS, io);
+    for (let now = 0; now < 6; now++)
+        assertEquals((await monitor.sample(now)).nvidiaLoad, 0, `load at ${now}`);
+    load = '70\n';
+    assertEquals((await monitor.sample(6)).nvidiaLoad, 0.7, 'load at 6');
 });
 
 test('the last known load is reported between queries of an idle card', async () => {
     const io = fakeIo({[STATUS_PATH]: 'active\n'});
     const monitor = new GpuMonitor(GPUS, io);
-    for (let now = 0; now < 10; now++)
+    for (let now = 0; now < 2 * WAKE_WATCH_SECONDS; now++)
         assertEquals((await monitor.sample(now)).nvidiaLoad, 0, `load at ${now}`);
 });
 
@@ -210,7 +231,7 @@ test('a card that wakes up again is queried at once', async () => {
     const queried = await secondsWithQuery(monitor, io, 12, now => {
         files[STATUS_PATH] = now >= 5 && now < 8 ? 'suspended\n' : 'active\n';
     });
-    assertEquals(queried, [0, 1, 2, 8, 9, 10], 'seconds with a query');
+    assertEquals(queried, [0, 1, 2, 3, 4, 8, 9, 10, 11], 'seconds with a query');
 });
 
 test('a failing nvidia-smi leaves the load without a value', async () => {

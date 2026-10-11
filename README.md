@@ -29,9 +29,11 @@ good. Panel Stats avoids that:
 
 - A card that is suspended, suspending or resuming is never queried. Its power state comes
   from sysfs (`power/runtime_status`), which does not touch the card.
-- An awake card that reports load is queried once per second.
-- An awake card that reports no load is queried once every 20 seconds, which leaves it room
-  to suspend.
+- A card that has just woken up is queried once per second for ten seconds. That is when
+  the application that woke it starts to render, and it costs nothing: after a wake-up the
+  card stays up for about 20 seconds by itself.
+- After that, a card that reports load is queried once per second, and a card that reports
+  no load once every 20 seconds, which leaves it room to suspend.
 
 Measured on the machine below, the extension did not delay the card going back to sleep:
 after a wake-up without a client the card suspended 20 s later with and without the
@@ -83,8 +85,8 @@ Disable the original System Monitor extension if it is enabled, otherwise both s
   gets the NVIDIA section, while the card is awake.
 - The 20 second gap assumes that an idle NVIDIA card suspends within 20 seconds. That holds
   for driver 595 on the test machine; other drivers have not been measured.
-- A workload that starts on a card that was already awake and idle can take up to 20 seconds
-  to show. A workload that wakes the card shows at once.
+- A workload that starts on a card that has been awake and idle for more than ten seconds
+  can take up to 20 seconds to show.
 - The integrated GPU's number is a three second mean, so it trails a sudden change by a
   second or two.
 - With an AMD integrated and an AMD discrete GPU only the boot GPU is shown.

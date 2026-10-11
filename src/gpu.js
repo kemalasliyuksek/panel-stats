@@ -34,6 +34,12 @@ export const IDLE_SAMPLE_GAP_SECONDS = 20;
 // long after its last non-zero sample, so a bursty workload does not read as idle.
 export const IDLE_SETTLE_SECONDS = 3;
 
+// A card that has just woken up is sampled on every tick for this long, whatever it reports.
+// An application that wakes the card needs a few seconds before it starts to render, and
+// backing off during those would hide its load for a whole idle gap. The samples cost
+// nothing: after a wake-up the card stays up for about 20 s by itself.
+export const WAKE_WATCH_SECONDS = 10;
+
 // gpu_busy_percent covers a very short moment: on a lightly used desktop about half of the
 // readings are 0 and the rest are scattered up to 100. One reading per second is noise, so
 // the integrated GPU's load is the mean of the readings of this many seconds. Callers feed
@@ -128,27 +134,28 @@ export function parsePercent(text) {
 
 // Decides on which ticks an awake NVIDIA card is queried. Times are in seconds.
 export class DgpuSampleSchedule {
+    #wakeTime = null;
     #lastSampleTime = null;
     #lastLoadTime = null;
 
     isDue(now) {
-        if (this.#lastSampleTime === null)
+        if (this.#wakeTime === null || now - this.#wakeTime < WAKE_WATCH_SECONDS)
             return true;
-        if (now - this.#lastLoadTime < IDLE_SETTLE_SECONDS)
+        if (this.#lastLoadTime !== null && now - this.#lastLoadTime < IDLE_SETTLE_SECONDS)
             return true;
         return now - this.#lastSampleTime >= IDLE_SAMPLE_GAP_SECONDS;
     }
 
     record(load, now) {
-        // The first sample after a wake-up counts as load, so a workload that is just starting
-        // is followed from its first seconds.
-        if (this.#lastSampleTime === null || load > 0)
+        this.#wakeTime ??= now;
+        if (load > 0)
             this.#lastLoadTime = now;
         this.#lastSampleTime = now;
     }
 
     // The card went to sleep; the next wake-up starts over.
     reset() {
+        this.#wakeTime = null;
         this.#lastSampleTime = null;
         this.#lastLoadTime = null;
     }
