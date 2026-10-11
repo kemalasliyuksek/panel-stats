@@ -20,6 +20,10 @@ SPDX-License-Identifier: GPL-2.0-or-later
       <default>true</default>
       <summary>Show swap usage</summary>
     </key>
+    <key name="show-gpu" type="b">
+      <default>true</default>
+      <summary>Show GPU usage</summary>
+    </key>
     <key name="show-upload" type="b">
       <default>true</default>
       <summary>Show upload</summary>

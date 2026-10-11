@@ -17,3 +17,6 @@
 .panel-stats-placeholder {-st-icon-style: symbolic;}
 
 .panel-button .high-usage {color: #ff7800;}
+
+/* The NVIDIA card is the state that costs battery and heat, so it stands out. */
+.panel-stats-gpu-nvidia .panel-stats-stat-section-icon {color: #76b900;}

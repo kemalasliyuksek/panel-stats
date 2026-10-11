@@ -20,7 +20,14 @@ import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
 
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
+import {GpuMonitor, findGpus} from './gpu.js';
+
 const THRESHOLD_HIGH = 0.80;
+
+const NO_VALUE = '–';
+
+// How often the integrated GPU is read for its mean, see INTEGRATED_WINDOW_SECONDS in gpu.js.
+const GPU_OBSERVE_INTERVAL_MS = 200;
 
 // The menu opens the first of these that is installed. Ubuntu 26.04 ships Resources instead
 // of GNOME System Monitor.
@@ -124,8 +131,12 @@ class LoadStatSection extends StatSection {
     }
 
     _update() {
-        const load = this._getLoadValue();
-        this.label.text = this.#formatter.format(load);
+        this._setLoad(this._getLoadValue());
+    }
+
+    // load is a fraction, or null when there is no reading.
+    _setLoad(load) {
+        this.label.text = load === null ? NO_VALUE : this.#formatter.format(load);
 
         if (load >= THRESHOLD_HIGH)
             this.add_style_class_name('high-usage');
@@ -193,6 +204,152 @@ class SwapSection extends LoadStatSection {
 
         const {used, total} = swap;
         return used / Math.max(total, 1.0);
+    }
+}
+
+// One GPU's section. Its value is pushed in by GpuStats instead of being polled by a timer of
+// its own.
+class GpuSection extends LoadStatSection {
+    static {
+        GObject.registerClass(this);
+    }
+
+    constructor(accessibleName) {
+        super('gpu-symbolic', accessibleName);
+    }
+
+    _ensureTimeout() {
+    }
+
+    _update() {
+    }
+
+    setLoad(load) {
+        this._setLoad(load);
+    }
+}
+
+// Feeds the two GPU sections from one GpuMonitor. The integrated GPU's section is always
+// there; the NVIDIA section appears while the card is awake. When the NVIDIA card may be
+// queried is decided in gpu.js.
+class GpuStats {
+    constructor(integratedSection, nvidiaSection, onChanged) {
+        this._integratedSection = integratedSection;
+        this._nvidiaSection = nvidiaSection;
+        this._onChanged = onChanged;
+
+        this._cancellable = new Gio.Cancellable();
+        this._monitor = null;
+        this._enabled = false;
+        this._sampling = false;
+        this._nvidiaAwake = false;
+
+        this._findGpus().catch(error => this._logUnlessCancelled(error));
+    }
+
+    // False until the GPUs have been looked up, and on machines where no GPU load can be read.
+    get supported() {
+        return this._monitor?.supported ?? false;
+    }
+
+    setEnabled(enabled) {
+        this._enabled = enabled;
+        this._sync();
+    }
+
+    destroy() {
+        this._cancellable.cancel();
+        this._clearTimeouts();
+    }
+
+    async _findGpus() {
+        const gpus = await findGpus(this._cancellable);
+        if (this._cancellable.is_cancelled())
+            return;
+
+        this._monitor = new GpuMonitor(gpus);
+        this._onChanged();
+    }
+
+    // The timers do not follow the sections' visibility like those of the other sections:
+    // with only an NVIDIA card to show, both sections are hidden while it sleeps, and its
+    // wake-up still has to be noticed.
+    _sync() {
+        const running = this._enabled && this.supported;
+
+        this._integratedSection.visible = running && this._monitor.hasIntegratedLoad;
+        this._nvidiaSection.visible = running && this._nvidiaAwake;
+
+        if (running) {
+            this._ensureTimeouts();
+            this._sample();
+        } else {
+            this._clearTimeouts();
+        }
+    }
+
+    _ensureTimeouts() {
+        if (this._sampleId)
+            return;
+
+        this._sampleId = GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT, 1,
+            () => {
+                this._sample();
+                return GLib.SOURCE_CONTINUE;
+            });
+        this._observeId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, GPU_OBSERVE_INTERVAL_MS,
+            () => {
+                this._observe();
+                return GLib.SOURCE_CONTINUE;
+            });
+    }
+
+    _clearTimeouts() {
+        if (this._sampleId)
+            GLib.source_remove(this._sampleId);
+        if (this._observeId)
+            GLib.source_remove(this._observeId);
+        delete this._sampleId;
+        delete this._observeId;
+    }
+
+    _observe() {
+        const now = GLib.get_monotonic_time() / GLib.USEC_PER_SEC;
+        this._monitor.observe(now, this._cancellable)
+            .catch(error => this._logUnlessCancelled(error));
+    }
+
+    // Reading the loads is asynchronous. A tick that arrives while a reading is still under
+    // way is skipped.
+    _sample() {
+        if (this._sampling)
+            return;
+
+        this._sampling = true;
+        const now = GLib.get_monotonic_time() / GLib.USEC_PER_SEC;
+        this._monitor.sample(now, this._cancellable)
+            .then(sample => this._show(sample))
+            .catch(error => this._logUnlessCancelled(error))
+            .finally(() => (this._sampling = false));
+    }
+
+    _show({integratedLoad, nvidiaAwake, nvidiaLoad}) {
+        if (this._cancellable.is_cancelled())
+            return;
+
+        this._integratedSection.setLoad(integratedLoad);
+        this._nvidiaSection.setLoad(nvidiaLoad);
+
+        if (nvidiaAwake === this._nvidiaAwake)
+            return;
+
+        this._nvidiaAwake = nvidiaAwake;
+        this._onChanged();
+    }
+
+    _logUnlessCancelled(error) {
+        if (!this._cancellable.is_cancelled())
+            console.error(`Panel Stats: ${error}`);
     }
 }
 
@@ -412,6 +569,18 @@ class Indicator extends PanelMenu.Button {
             Gio.SettingsBindFlags.GET);
         box.add_child(this._swapSection);
 
+        // Not bound to their setting like the others: GpuStats shows and hides them.
+        this._gpuSection = new GpuSection(_('GPU stats'));
+        box.add_child(this._gpuSection);
+
+        this._nvidiaSection = new GpuSection(_('NVIDIA GPU stats'));
+        this._nvidiaSection.add_style_class_name('panel-stats-gpu-nvidia');
+        box.add_child(this._nvidiaSection);
+
+        this._gpuStats = new GpuStats(this._gpuSection, this._nvidiaSection,
+            () => this._sync());
+        this.connect('destroy', () => this._gpuStats.destroy());
+
         this._ulSection = new UploadSection();
         this._settings.bind('show-upload',
             this._ulSection, 'visible',
@@ -433,6 +602,8 @@ class Indicator extends PanelMenu.Button {
             () => this._toggleSettings('show-memory'));
         this._swapItem = this.menu.addAction(_('Swap'),
             () => this._toggleSettings('show-swap'));
+        this._gpuItem = this.menu.addAction(_('GPU'),
+            () => this._toggleSettings('show-gpu'));
         this._ulItem = this.menu.addAction(_('Upload'),
             () => this._toggleSettings('show-upload'));
         this._dlItem = this.menu.addAction(_('Download'),
@@ -490,6 +661,9 @@ class Indicator extends PanelMenu.Button {
         this._swapItem.setOrnament(this._settings.get_boolean('show-swap')
             ? PopupMenu.Ornament.CHECK
             : PopupMenu.Ornament.NONE);
+        this._gpuItem.setOrnament(this._settings.get_boolean('show-gpu')
+            ? PopupMenu.Ornament.CHECK
+            : PopupMenu.Ornament.NONE);
         this._ulItem.setOrnament(this._settings.get_boolean('show-upload')
             ? PopupMenu.Ornament.CHECK
             : PopupMenu.Ornament.NONE);
@@ -497,8 +671,12 @@ class Indicator extends PanelMenu.Button {
             ? PopupMenu.Ornament.CHECK
             : PopupMenu.Ornament.NONE);
 
-        this._placeholder.visible =
-            this._settings.list_keys().every(key => !this._settings.get_boolean(key));
+        this._gpuItem.visible = this._gpuStats.supported;
+        this._gpuStats.setEnabled(this._settings.get_boolean('show-gpu'));
+
+        const gpuShown = this._gpuSection.visible || this._nvidiaSection.visible;
+        this._placeholder.visible = this._settings.list_keys().every(key =>
+            !this._settings.get_boolean(key) || (key === 'show-gpu' && !gpuShown));
     }
 }
 

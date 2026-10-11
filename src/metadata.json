@@ -1,7 +1,7 @@
 {
   "uuid": "panel-stats@kemalasliyuksek.com",
   "name": "Panel Stats",
-  "description": "System usage in the top bar. A fork of the System Monitor extension from gnome-shell-extensions.",
+  "description": "CPU, memory, swap, network and GPU usage in the top bar. The integrated GPU is always shown; on hybrid graphics laptops a second section appears while the NVIDIA GPU is awake, and measuring it does not keep the card awake. A fork of the System Monitor extension from gnome-shell-extensions.",
   "shell-version": [
     "50"
   ],
