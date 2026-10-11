@@ -22,6 +22,15 @@ import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
 const THRESHOLD_HIGH = 0.80;
 
+// The menu opens the first of these that is installed. Ubuntu 26.04 ships Resources instead
+// of GNOME System Monitor.
+const MONITOR_APP_IDS = [
+    'org.gnome.SystemMonitor.desktop',
+    'net.nokyan.Resources.desktop',
+    'io.missioncenter.MissionCenter.desktop',
+    'org.gnome.Usage.desktop',
+];
+
 // adapted from load-graph.cpp in gnome-system-monitor
 /**
  * @param {string} str
@@ -380,6 +389,11 @@ class Indicator extends PanelMenu.Button {
         });
         box.add_child(this._placeholder);
 
+        const ext = Extension.lookupByURL(import.meta.url);
+        this._fallbackIcon = new Gio.FileIcon({
+            file: ext.dir.resolve_relative_path('icons/processor-symbolic.svg'),
+        });
+
         this._cpuSection = new CpuSection();
         this._settings.bind('show-cpu',
             this._cpuSection, 'visible',
@@ -424,9 +438,10 @@ class Indicator extends PanelMenu.Button {
         this._dlItem = this.menu.addAction(_('Download'),
             () => this._toggleSettings('show-download'));
 
-        this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
+        this._appSeparator = new PopupMenu.PopupSeparatorMenuItem();
+        this.menu.addMenuItem(this._appSeparator);
 
-        this._appMenuItem = this.menu.addAction(_('Open System Monitor'),
+        this._appMenuItem = this.menu.addAction('',
             () => this._openSystemMonitor());
 
         const appSystem = Shell.AppSystem.get_default();
@@ -441,10 +456,19 @@ class Indicator extends PanelMenu.Button {
 
     _updateSystemMonitorApp() {
         const appSystem = Shell.AppSystem.get_default();
-        this._systemMonitorApp =
-            appSystem.lookup_app('org.gnome.SystemMonitor.desktop');
-        this._placeholder.gicon = this._systemMonitorApp?.icon ?? null;
-        this.visible = this._systemMonitorApp != null;
+        this._systemMonitorApp = MONITOR_APP_IDS
+            .map(id => appSystem.lookup_app(id))
+            .find(app => app != null) ?? null;
+        this._placeholder.gicon =
+            this._systemMonitorApp?.icon ?? this._fallbackIcon;
+
+        // Without a monitor application only the menu entry goes away, not the indicator.
+        this._appSeparator.visible = this._systemMonitorApp != null;
+        this._appMenuItem.visible = this._systemMonitorApp != null;
+        if (this._systemMonitorApp) {
+            this._appMenuItem.label.text =
+                _('Open %s').format(this._systemMonitorApp.get_name());
+        }
     }
 
     _openSystemMonitor() {
