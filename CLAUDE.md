@@ -39,3 +39,6 @@ There is no ESLint setup yet; `just lint` is a syntax check only.
   after touching the sampling schedule.
 - extensions.gnome.org reviews reject synchronous file IO in the Shell process. Use the
   asynchronous Gio calls.
+- `just shexli` reports one warning that is a false positive: EGO-L-004 on the timer in
+  `StatSection`, which is upstream code. The timer is removed in the section's `destroy`
+  handler, which the analysis does not follow.

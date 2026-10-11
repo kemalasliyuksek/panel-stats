@@ -32,3 +32,8 @@ install: schemas
 # build the zip for extensions.gnome.org
 pack:
     gnome-extensions pack src --force --extra-source=gpu.js --extra-source=icons
+
+# run the static analysis that extensions.gnome.org applies to uploads; shexli 0.2.1 segfaults
+# with tree-sitter 0.26, and it needs an absolute path
+shexli: pack
+    uvx --with "tree-sitter==0.25.2" shexli "{{justfile_directory()}}/{{uuid}}.shell-extension.zip"
