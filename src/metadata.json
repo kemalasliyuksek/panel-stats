@@ -1,10 +1,12 @@
 {
-"extension-id": "system-monitor",
-"uuid": "system-monitor@gnome-shell-extensions.gcampax.github.com",
-"settings-schema": "org.gnome.shell.extensions.system-monitor",
-"gettext-domain": "gnome-shell-extensions",
-"name": "System Monitor",
-"description": "Monitor system from the top bar",
-"shell-version": [ "50" ],
-"url": "https://gitlab.gnome.org/GNOME/gnome-shell-extensions"
+  "uuid": "panel-stats@kemalasliyuksek.com",
+  "name": "Panel Stats",
+  "description": "System usage in the top bar. A fork of the System Monitor extension from gnome-shell-extensions.",
+  "shell-version": [
+    "50"
+  ],
+  "version-name": "0.1.0",
+  "settings-schema": "org.gnome.shell.extensions.panel-stats",
+  "gettext-domain": "panel-stats",
+  "url": "https://github.com/kemalasliyuksek/panel-stats"
 }

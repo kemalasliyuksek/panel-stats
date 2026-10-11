@@ -1,5 +1,6 @@
 /*
  * SPDX-FileCopyrightText: 2023 Florian Müllner <fmuellner@gnome.org>
+ * SPDX-FileCopyrightText: 2026 Kemal Aslıyüksek
  *
  * SPDX-License-Identifier: GPL-2.0-or-later
  */
@@ -41,7 +42,7 @@ class StatSection extends St.BoxLayout {
 
     constructor(iconName, accessibleName) {
         super({
-            style_class: 'system-monitor-stat-section',
+            style_class: 'panel-stats-stat-section',
             accessibleName,
         });
 
@@ -50,13 +51,13 @@ class StatSection extends St.BoxLayout {
             ext.dir.resolve_relative_path(`icons/${iconName}.svg`);
 
         this._icon = new St.Icon({
-            style_class: 'system-monitor-stat-section-icon',
+            style_class: 'panel-stats-stat-section-icon',
             gicon: new Gio.FileIcon({file}),
         });
         this.add_child(this._icon);
 
         this.label = new St.Label({
-            style_class: 'system-monitor-stat-section-label',
+            style_class: 'panel-stats-stat-section-label',
             y_align: Clutter.ActorAlign.CENTER,
         });
         this.label.clutter_text.set({
@@ -369,13 +370,13 @@ class Indicator extends PanelMenu.Button {
             () => (this._settings = null));
 
         const box = new St.BoxLayout({
-            styleClass: 'system-monitor-stat-sections',
+            styleClass: 'panel-stats-stat-sections',
         });
 
         this.add_child(box);
 
         this._placeholder = new St.Icon({
-            styleClass: 'system-status-icon system-monitor-placeholder',
+            styleClass: 'system-status-icon panel-stats-placeholder',
         });
         box.add_child(this._placeholder);
 
@@ -477,7 +478,7 @@ class Indicator extends PanelMenu.Button {
     }
 }
 
-export default class SystemMonitorExtension extends Extension {
+export default class PanelStatsExtension extends Extension {
     enable() {
         this._indicator = new Indicator(this.getSettings());
         Main.panel.addToStatusArea(this.uuid, this._indicator);

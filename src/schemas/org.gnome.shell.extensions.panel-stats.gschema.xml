@@ -1,12 +1,13 @@
 <!--
 SPDX-FileCopyrightText: 2023 Florian Müllner <fmuellner@gnome.org>
+SPDX-FileCopyrightText: 2026 Kemal Aslıyüksek
 
 SPDX-License-Identifier: GPL-2.0-or-later
 -->
 
-<schemalist gettext-domain="gnome-shell-extensions">
-  <schema id="org.gnome.shell.extensions.system-monitor"
-          path="/org/gnome/shell/extensions/system-monitor/">
+<schemalist gettext-domain="panel-stats">
+  <schema id="org.gnome.shell.extensions.panel-stats"
+          path="/org/gnome/shell/extensions/panel-stats/">
     <key name="show-cpu" type="b">
       <default>true</default>
       <summary>Show CPU usage</summary>
