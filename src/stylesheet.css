@@ -20,3 +20,15 @@
 
 /* The NVIDIA card is the state that costs battery and heat, so it stands out. */
 .panel-stats-gpu-nvidia .panel-stats-stat-section-icon {color: #76b900;}
+
+/* The other sections get the gap between icon and value from a centred number in a label of
+   fixed width. The top consumer's text is left aligned, so that it does not jump with every
+   new leader, and needs the gap spelled out. */
+.panel-stats-top {spacing: 0.6em;}
+.panel-stats-top .panel-stats-stat-section-label {min-width: 6em;}
+
+.panel-stats-top-value {
+  min-width: 4.5em;
+  text-align: right;
+}
+.panel-stats-top-header {font-size: 0.9em;}

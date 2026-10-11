@@ -21,6 +21,7 @@ import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
 import {GpuMonitor, findGpus} from './gpu.js';
+import {Reason, TopMonitor} from './top.js';
 
 const THRESHOLD_HIGH = 0.80;
 
@@ -28,6 +29,13 @@ const NO_VALUE = '–';
 
 // How often the integrated GPU is read for its mean, see INTEGRATED_WINDOW_SECONDS in gpu.js.
 const GPU_OBSERVE_INTERVAL_MS = 200;
+
+// How often the applications and services are ranked, and how many of them the menu lists.
+const TOP_INTERVAL_SECONDS = 3;
+const TOP_MENU_ROWS = 5;
+
+// Longer names are cut, so that the panel does not change width much with a new leader.
+const TOP_NAME_MAX_CHARS = 12;
 
 // The menu opens the first of these that is installed. Ubuntu 26.04 ships Resources instead
 // of GNOME System Monitor.
@@ -533,6 +541,206 @@ class DownloadSection extends NetStatSection {
     }
 }
 
+// Names the application or service that weighs most on the machine. Its text is pushed in by
+// TopStats.
+class TopSection extends StatSection {
+    static {
+        GObject.registerClass(this);
+    }
+
+    constructor() {
+        super('top-symbolic', _('Top consumer'));
+
+        this.add_style_class_name('panel-stats-top');
+        this.label.clutter_text.x_align = Clutter.ActorAlign.START;
+    }
+
+    _ensureTimeout() {
+    }
+
+    _update() {
+    }
+
+    setText(text) {
+        this.label.text = text;
+    }
+}
+
+// One line of the menu's list of top consumers: a name, its CPU share, its memory and its
+// score.
+class TopRow extends PopupMenu.PopupBaseMenuItem {
+    static {
+        GObject.registerClass(this);
+    }
+
+    constructor() {
+        super({reactive: false, can_focus: false});
+
+        this._name = new St.Label({
+            x_expand: true,
+            y_align: Clutter.ActorAlign.CENTER,
+        });
+        this.add_child(this._name);
+
+        this._values = [];
+        for (let i = 0; i < 3; i++) {
+            const value = new St.Label({
+                style_class: 'panel-stats-top-value',
+                y_align: Clutter.ActorAlign.CENTER,
+            });
+            this.add_child(value);
+            this._values.push(value);
+        }
+    }
+
+    setTexts(name, ...values) {
+        this._name.text = name;
+        this._values.forEach((label, i) => (label.text = values[i]));
+    }
+}
+
+// Ranks the applications and services every few seconds, shows the leader in the panel and
+// the first few in the menu. How they are weighed is decided in top.js.
+class TopStats {
+    constructor(section, title, header, rows, onChanged) {
+        this._section = section;
+        this._title = title;
+        this._header = header;
+        this._rows = rows;
+        this._onChanged = onChanged;
+
+        this._cancellable = new Gio.Cancellable();
+        this._monitor = new TopMonitor();
+        this._enabled = false;
+        this._sampling = false;
+        this._ranked = 0;
+
+        this._percent = new Intl.NumberFormat(undefined, {style: 'percent'});
+        this._score = new Intl.NumberFormat(undefined, {
+            maximumFractionDigits: 1,
+            minimumFractionDigits: 1,
+        });
+        this._megabytes = new Intl.NumberFormat(undefined, {
+            style: 'unit',
+            unit: 'megabyte',
+            maximumFractionDigits: 0,
+        });
+        this._gigabytes = new Intl.NumberFormat(undefined, {
+            style: 'unit',
+            unit: 'gigabyte',
+            maximumFractionDigits: 1,
+            minimumFractionDigits: 1,
+        });
+    }
+
+    setEnabled(enabled) {
+        this._enabled = enabled;
+        this._sync();
+    }
+
+    destroy() {
+        this._cancellable.cancel();
+        this._clearTimeout();
+    }
+
+    _sync() {
+        const shown = this._enabled && this._ranked > 0;
+        this._section.visible = shown;
+        this._title.visible = shown;
+        this._header.visible = shown;
+        this._rows.forEach((row, i) => (row.visible = shown && i < this._ranked));
+
+        if (this._enabled)
+            this._ensureTimeout();
+        else
+            this._clearTimeout();
+    }
+
+    _ensureTimeout() {
+        if (this._sampleId)
+            return;
+
+        this._sampleId = GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT, TOP_INTERVAL_SECONDS,
+            () => {
+                this._sample();
+                return GLib.SOURCE_CONTINUE;
+            });
+        this._sample();
+    }
+
+    _clearTimeout() {
+        if (this._sampleId)
+            GLib.source_remove(this._sampleId);
+        delete this._sampleId;
+    }
+
+    // Reading the counters is asynchronous. A tick that arrives while a reading is still
+    // under way is skipped.
+    _sample() {
+        if (this._sampling)
+            return;
+
+        this._sampling = true;
+        const now = GLib.get_monotonic_time() / GLib.USEC_PER_SEC;
+        this._monitor.sample(now, this._cancellable, TOP_MENU_ROWS)
+            .then(result => this._show(result))
+            .catch(error => {
+                if (!this._cancellable.is_cancelled())
+                    console.error(`Panel Stats: ${error}`);
+            })
+            .finally(() => (this._sampling = false));
+    }
+
+    _show({leader, ranking}) {
+        if (this._cancellable.is_cancelled())
+            return;
+
+        if (leader) {
+            const name = this._nameOf(leader);
+            const short = name.length > TOP_NAME_MAX_CHARS
+                ? `${name.slice(0, TOP_NAME_MAX_CHARS - 1)}…`
+                : name;
+            const value = leader.reason === Reason.MEMORY
+                ? this._formatMemory(leader.memoryBytes)
+                : this._percent.format(leader.cpuShare);
+            this._section.setText(`${short} ${value}`);
+        }
+
+        // Entries whose score would show as 0.0 only add noise below the first one.
+        const listed = ranking.slice(0, this._rows.length)
+            .filter((entry, i) => i === 0 || entry.score * 100 >= 0.05);
+        listed.forEach((entry, i) => {
+            this._rows[i].setTexts(this._nameOf(entry),
+                this._percent.format(entry.cpuShare),
+                this._formatMemory(entry.memoryBytes),
+                this._score.format(entry.score * 100));
+        });
+
+        const ranked = leader ? listed.length : 0;
+        if (ranked === this._ranked)
+            return;
+
+        this._ranked = ranked;
+        this._onChanged();
+    }
+
+    // An entry whose id is that of an installed application gets the application's name.
+    _nameOf(entry) {
+        const app = entry.appId
+            ? Shell.AppSystem.get_default().lookup_app(`${entry.appId}.desktop`)
+            : null;
+        return app?.get_name() ?? entry.label;
+    }
+
+    _formatMemory(bytes) {
+        if (bytes === null)
+            return NO_VALUE;
+        return bytes >= 2 ** 30
+            ? this._gigabytes.format(bytes / 2 ** 30)
+            : this._megabytes.format(bytes / 2 ** 20);
+    }
+}
+
 class Indicator extends PanelMenu.Button {
     static {
         GObject.registerClass(this);
@@ -603,6 +811,27 @@ class Indicator extends PanelMenu.Button {
             Gio.SettingsBindFlags.GET);
         box.add_child(this._dlSection);
 
+        this._topSection = new TopSection();
+        box.add_child(this._topSection);
+
+        const topTitle = new PopupMenu.PopupSeparatorMenuItem(_('Weighing on the system'));
+        this.menu.addMenuItem(topTitle);
+
+        const topHeader = new TopRow();
+        topHeader.setTexts('', _('CPU'), _('Memory'), _('Score'));
+        topHeader.add_style_class_name('panel-stats-top-header');
+        this.menu.addMenuItem(topHeader);
+
+        const topRows = [];
+        for (let i = 0; i < TOP_MENU_ROWS; i++) {
+            topRows.push(new TopRow());
+            this.menu.addMenuItem(topRows.at(-1));
+        }
+
+        this._topStats = new TopStats(this._topSection, topTitle, topHeader, topRows,
+            () => this._sync());
+        this.connect('destroy', () => this._topStats.destroy());
+
         this.menu.addMenuItem(
             new PopupMenu.PopupSeparatorMenuItem(_('Show')));
 
@@ -618,6 +847,8 @@ class Indicator extends PanelMenu.Button {
             () => this._toggleSettings('show-upload'));
         this._dlItem = this.menu.addAction(_('Download'),
             () => this._toggleSettings('show-download'));
+        this._topItem = this.menu.addAction(_('Top consumer'),
+            () => this._toggleSettings('show-top'));
 
         this._appSeparator = new PopupMenu.PopupSeparatorMenuItem();
         this.menu.addMenuItem(this._appSeparator);
@@ -681,12 +912,20 @@ class Indicator extends PanelMenu.Button {
             ? PopupMenu.Ornament.CHECK
             : PopupMenu.Ornament.NONE);
 
+        this._topItem.setOrnament(this._settings.get_boolean('show-top')
+            ? PopupMenu.Ornament.CHECK
+            : PopupMenu.Ornament.NONE);
+
         this._gpuItem.visible = this._gpuStats.supported;
         this._gpuStats.setEnabled(this._settings.get_boolean('show-gpu'));
+        this._topStats.setEnabled(this._settings.get_boolean('show-top'));
 
+        // A setting only counts as showing something if its sections are really there.
         const gpuShown = this._gpuSection.visible || this._nvidiaSection.visible;
-        this._placeholder.visible = this._settings.list_keys().every(key =>
-            !this._settings.get_boolean(key) || (key === 'show-gpu' && !gpuShown));
+        const hidden = key => !this._settings.get_boolean(key) ||
+            (key === 'show-gpu' && !gpuShown) ||
+            (key === 'show-top' && !this._topSection.visible);
+        this._placeholder.visible = this._settings.list_keys().every(hidden);
     }
 }
 

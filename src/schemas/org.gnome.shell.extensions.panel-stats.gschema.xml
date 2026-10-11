@@ -32,5 +32,9 @@ SPDX-License-Identifier: GPL-2.0-or-later
       <default>true</default>
       <summary>Show download</summary>
     </key>
+    <key name="show-top" type="b">
+      <default>true</default>
+      <summary>Show the application or service that weighs most on the system</summary>
+    </key>
   </schema>
 </schemalist>

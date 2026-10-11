@@ -25,13 +25,17 @@ check: lint test
 sample seconds="30":
     gjs -m tools/sample.js {{seconds}}
 
+# print the ranking the top consumer section is taken from
+top samples="5" rows="5":
+    gjs -m tools/top.js {{samples}} {{rows}}
+
 # symlink src/ into the user's extension directory; GNOME Shell loads it at the next login
 install: schemas
     ln -sfn "{{justfile_directory()}}/src" "{{install_dir}}"
 
 # build the zip for extensions.gnome.org
 pack:
-    gnome-extensions pack src --force --extra-source=gpu.js --extra-source=icons
+    gnome-extensions pack src --force --extra-source=io.js --extra-source=gpu.js --extra-source=top.js --extra-source=icons
 
 # run the static analysis that extensions.gnome.org applies to uploads; shexli 0.2.1 segfaults
 # with tree-sitter 0.26, and it needs an absolute path
