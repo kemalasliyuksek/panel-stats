@@ -17,10 +17,11 @@ section. Personal open source project, uuid `panel-stats@kemalasliyuksek.com`.
   `~/.local/share/gnome-shell/extensions/` and what `gnome-extensions pack` zips.
 - `src/extension.js` is the upstream file plus our changes. Keep the diff against upstream
   small so a new GNOME release can be merged: do not reformat or restructure upstream code.
-- `src/gpu.js` holds everything about GPUs and does not import anything from GNOME Shell,
-  so it runs under plain gjs.
-- `tests/run.js` are the unit tests for `gpu.js`, `tools/sample.js` runs it against the real
-  hardware.
+- `src/gpu.js` holds everything about GPUs, `src/top.js` the ranking of applications and
+  services, `src/io.js` the file and process helpers they share. None of them imports
+  anything from GNOME Shell, so they run under plain gjs.
+- `tests/` holds the unit tests (`run.js` runs `gpu.test.js` and `top.test.js`);
+  `tools/sample.js` and `tools/top.js` run the two modules against the real machine.
 
 ## Commands
 

@@ -1,12 +1,14 @@
 # Panel Stats
 
-A GNOME Shell extension that shows CPU, memory, swap, GPU and network usage in the top bar.
+A GNOME Shell extension that shows CPU, memory, swap, GPU and network usage in the top bar,
+and names the application or service that weighs most on the machine.
 
 It is a fork of the System Monitor extension from
 [gnome-shell-extensions](https://gitlab.gnome.org/GNOME/gnome-shell-extensions) 50.0, written
-by Florian Müllner. Two things differ:
+by Florian Müllner. Three things differ:
 
 - there are GPU sections
+- there is a section for the top consumer
 - the indicator no longer hides itself when GNOME System Monitor is not installed; the menu
   opens Resources, Mission Center or GNOME Usage instead, whichever is there
 
@@ -53,12 +55,46 @@ times per second and shows the mean of the last three seconds. On a 60 second re
 brought the average change between two consecutive values from 44 points down to 5.5. One
 reading takes about 20 microseconds.
 
+## Top consumer
+
+The last section names the application or service that weighs most on the machine right now,
+for example `Firefox 12%` or `Blender 9.4 GB`. The menu lists the first five with their CPU
+share, memory and score.
+
+What is ranked are systemd units, not processes: every application and every service runs in
+a control group of its own, and the kernel keeps CPU time and memory per group. An
+application made of dozens of processes is one entry.
+
+The score is not an average of percentages. How much a resource matters depends on how scarce
+it is at the moment:
+
+- CPU time always counts, because it costs power and heat. It counts more when the kernel
+  reports CPU pressure, that is when tasks are waiting for a CPU.
+- Memory does not count while less than 60% of it is in use: memory that is in use slows
+  nothing down as long as plenty is left. Above that its weight rises, up to full weight when
+  the memory is used up or the kernel reports memory pressure.
+
+An entry's score is its share of the CPU times the CPU's weight, plus its share of the memory
+times the memory's weight. A program that holds 80% of the memory at 2% CPU therefore
+outranks one at 20% CPU when memory is nearly full, and ranks below it when half of the
+memory is free. The value next to the name is the resource that decided: a percentage for
+CPU, a size for memory.
+
+Memory means anonymous and shared memory. The page cache a group is charged for is left out,
+because it is given back on demand.
+
+The CPU share is the mean of the last three samples, taken every three seconds, and a
+challenger has to lead by 15% to replace the current leader. One sample reads about a
+hundred small files; on the test machine that takes 24 ms of CPU time, which is 0.8% of one
+core.
+
 ## Requirements
 
 - GNOME Shell 50
 - `gir1.2-gtop-2.0` (Debian and Ubuntu name), like the original extension
 - for the NVIDIA load: the `nvidia` kernel module and `nvidia-smi`
 - for the integrated GPU's load: a driver that exposes `gpu_busy_percent`, which is amdgpu
+- for the top consumer: systemd and cgroup v2
 
 A section is only shown for a GPU whose load can be read.
 
@@ -94,14 +130,18 @@ Disable the original System Monitor extension if it is enabled, otherwise both s
 - The integrated GPU's number is a three second mean, so it trails a sudden change by a
   second or two.
 - With an AMD integrated and an AMD discrete GPU only the boot GPU is shown.
+- The top consumer is ranked by CPU and memory only. GPU, disk and network use cannot be
+  attributed to an application without root privileges, or only in part, so they are left
+  out instead of being guessed.
 
 ## Development
 
-`src/gpu.js` does not depend on GNOME Shell.
+`src/gpu.js`, `src/top.js` and `src/io.js` do not depend on GNOME Shell.
 
 ```
 just check     # syntax check and unit tests
 just sample    # print what the GPU sections would show, once per second
+just top       # print the ranking the top consumer is taken from
 ```
 
 In the `just sample` output a `*` marks the seconds in which `nvidia-smi` ran, next to the
