@@ -38,6 +38,13 @@ const MONITOR_APP_IDS = [
     'org.gnome.Usage.desktop',
 ];
 
+// The icons are found relative to this file, which needs no reference to the extension
+// object.
+function iconFile(name) {
+    return Gio.File.new_for_uri(import.meta.url)
+        .get_parent().resolve_relative_path(`icons/${name}.svg`);
+}
+
 // adapted from load-graph.cpp in gnome-system-monitor
 /**
  * @param {string} str
@@ -62,13 +69,9 @@ class StatSection extends St.BoxLayout {
             accessibleName,
         });
 
-        const ext = Extension.lookupByURL(import.meta.url);
-        const file =
-            ext.dir.resolve_relative_path(`icons/${iconName}.svg`);
-
         this._icon = new St.Icon({
             style_class: 'panel-stats-stat-section-icon',
-            gicon: new Gio.FileIcon({file}),
+            gicon: new Gio.FileIcon({file: iconFile(iconName)}),
         });
         this.add_child(this._icon);
 
@@ -546,9 +549,8 @@ class Indicator extends PanelMenu.Button {
         });
         box.add_child(this._placeholder);
 
-        const ext = Extension.lookupByURL(import.meta.url);
         this._fallbackIcon = new Gio.FileIcon({
-            file: ext.dir.resolve_relative_path('icons/processor-symbolic.svg'),
+            file: iconFile('processor-symbolic'),
         });
 
         this._cpuSection = new CpuSection();
