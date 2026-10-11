@@ -2,14 +2,7 @@
 // Reports the load of the integrated GPU and, while it is awake, of the NVIDIA card, without
 // ever being the reason the NVIDIA card is awake. Independent of GNOME Shell so it runs under
 // plain gjs (tools/, tests/).
-import Gio from 'gi://Gio';
-import GLib from 'gi://GLib';
-
-Gio._promisify(Gio.File.prototype, 'load_contents_async');
-Gio._promisify(Gio.File.prototype, 'enumerate_children_async');
-Gio._promisify(Gio.FileEnumerator.prototype, 'next_files_async');
-Gio._promisify(Gio.FileEnumerator.prototype, 'close_async');
-Gio._promisify(Gio.Subprocess.prototype, 'communicate_utf8_async');
+import {listNames, readText, runCommand} from './io.js';
 
 const NVIDIA_PCI_DRIVER_DIR = '/sys/bus/pci/drivers/nvidia';
 const DRM_CLASS_DIR = '/sys/class/drm';
@@ -19,9 +12,6 @@ const DRM_CARD = /^card\d+$/;
 // "unsupported" means the kernel cannot runtime suspend the card, so it is always on. A card
 // that is "suspending" or "resuming" is left alone.
 const AWAKE_STATUSES = new Set(['active', 'unsupported']);
-
-const ENUMERATE_BATCH = 64;
-const COMMAND_TIMEOUT_SECONDS = 5;
 
 // nvidia-smi opens the card, and every open holds it awake for a while. Sampling an idle card
 // on every tick would keep it powered for as long as the extension runs. An awake card that
@@ -45,80 +35,6 @@ export const WAKE_WATCH_SECONDS = 10;
 // the integrated GPU's load is the mean of the readings of this many seconds. Callers feed
 // the window through observe().
 export const INTEGRATED_WINDOW_SECONDS = 3;
-
-function isCancelled(error) {
-    return error instanceof GLib.Error && error.matches(Gio.IOErrorEnum, Gio.IOErrorEnum.CANCELLED);
-}
-
-// sysfs files come and go with the hardware state; an unreadable one is reported as null.
-// Cancellation is propagated so callers can stop.
-async function readText(path, cancellable) {
-    try {
-        const [bytes] = await Gio.File.new_for_path(path).load_contents_async(cancellable);
-        return new TextDecoder().decode(bytes);
-    } catch (error) {
-        if (isCancelled(error))
-            throw error;
-        return null;
-    }
-}
-
-async function listNames(path, cancellable) {
-    let enumerator;
-    try {
-        enumerator = await Gio.File.new_for_path(path).enumerate_children_async('standard::name',
-            Gio.FileQueryInfoFlags.NOFOLLOW_SYMLINKS, GLib.PRIORITY_DEFAULT, cancellable);
-    } catch (error) {
-        if (isCancelled(error))
-            throw error;
-        return [];
-    }
-    const names = [];
-    try {
-        for (;;) {
-            const batch = await enumerator.next_files_async(ENUMERATE_BATCH, GLib.PRIORITY_DEFAULT, cancellable);
-            if (batch.length === 0)
-                break;
-            names.push(...batch.map(info => info.get_name()));
-        }
-    } catch (error) {
-        if (isCancelled(error))
-            throw error;
-    } finally {
-        enumerator.close_async(GLib.PRIORITY_DEFAULT, null).catch(() => {});
-    }
-    return names;
-}
-
-// Resolves to stdout, or to null when the command cannot be started, fails or hangs.
-async function runCommand(argv, cancellable) {
-    let proc;
-    try {
-        proc = Gio.Subprocess.new(argv,
-            Gio.SubprocessFlags.STDOUT_PIPE | Gio.SubprocessFlags.STDERR_SILENCE);
-    } catch {
-        return null;
-    }
-    const cancelId = cancellable?.connect(() => proc.force_exit()) ?? 0;
-    let timeoutId = GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT, COMMAND_TIMEOUT_SECONDS, () => {
-        timeoutId = 0;
-        proc.force_exit();
-        return GLib.SOURCE_REMOVE;
-    });
-    try {
-        const [stdout] = await proc.communicate_utf8_async(null, cancellable);
-        return proc.get_successful() ? stdout : null;
-    } catch (error) {
-        if (isCancelled(error))
-            throw error;
-        return null;
-    } finally {
-        if (timeoutId)
-            GLib.source_remove(timeoutId);
-        if (cancelId)
-            cancellable.disconnect(cancelId);
-    }
-}
 
 // What GpuMonitor reads the machine through. Exported so tools can wrap it.
 export const systemIo = Object.freeze({readText, runCommand});
