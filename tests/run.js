@@ -4,5 +4,6 @@ import System from 'system';
 
 import {run} from './harness.js';
 import './gpu.test.js';
+import './top.test.js';
 
 System.exit(await run() === 0 ? 0 : 1);
